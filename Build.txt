@@ -1,0 +1,21 @@
+From mockoon-ui, open a terminal (PowerShell or cmd) so the Docker context sees the whole monorepo.
+(Optional) Pull base image updates: docker pull node:22-alpine.
+Build the image with the provided Dockerfile, tagging as you like:
+docker build `
+  -f packages/cli/docker/Dockerfile `
+  -t mockoon-cli-ui:latest `
+  .
+If you need a specific CLI version bundled, add the build arg (defaults to latest):
+docker build `
+  -f packages/cli/docker/Dockerfile `
+  --build-arg version=9.3.0 `
+  -t mockoon-cli-ui:9.3.0 `
+  .
+Verify the image locally by running it; expose the CLI API (3000) and UI (8080), and mount a data directory if desired:
+docker run `
+  --rm `
+  -p 3000:3000 `
+  -p 8080:8080 `
+  -v ${PWD}\mockoon-data:/data `
+  mockoon-cli-ui:latest
+Once satisfied, push to your registry (docker tag/docker push) or integrate the build command into your CI pipeline.
