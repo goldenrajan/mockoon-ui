@@ -1,144 +1,394 @@
 import { Injectable } from '@angular/core';
 import { Environment } from '@mockoon/commons';
 import { MainAPIModel } from 'src/renderer/app/models/main-api.model';
-import { Settings } from 'src/shared/models/settings.model';
+import {
+  EnvironmentDescriptor,
+  Settings
+} from 'src/shared/models/settings.model';
+
+type DockerRuntimeConfig = {
+  storageApiBase?: string;
+};
+
+declare global {
+  interface Window {
+    __MOCKOON_DOCKER_CONFIG__?: DockerRuntimeConfig;
+  }
+}
 
 /**
  * Main API service used to emulate calls to Electron's main process (preload + ipc.ts) in the web version
  *
- * Some methods are noops as they are not needed in the web version
- *
+ * This implementation keeps IndexedDB/localStorage persistence for the default web build
+ * while optionally delegating data access to a storage API when running inside the Docker
+ * runtime. The storage API URL is provided through the window.__MOCKOON_DOCKER_CONFIG__ global.
  */
 @Injectable({ providedIn: 'root' })
 export class MainApiService implements MainAPIModel {
-  private dbName = 'mockoon-db';
+  private readonly dbName = 'mockoon-db';
   // version can be always 1 as migrations are handled by the environment schema/migrationId
   // Also, the web app is always up to date with the latest schema and first user to connect migrates the envs
-  private dbVersion = 1;
-  private environmentStoreName = 'environments';
+  private readonly dbVersion = 1;
+  private readonly environmentStoreName = 'environments';
+
+  private readonly storageApiBase: string | null;
+  private readonly useStorageApi: boolean;
+
+  constructor() {
+    const dockerConfig =
+      typeof window !== 'undefined' && window.__MOCKOON_DOCKER_CONFIG__
+        ? window.__MOCKOON_DOCKER_CONFIG__
+        : {};
+
+    this.storageApiBase = this.normalizeApiBase(dockerConfig.storageApiBase);
+    this.useStorageApi = !!this.storageApiBase;
+  }
 
   public invoke(channel: string, ...data: any[]) {
-    return new Promise<any>((resolve) => {
-      let result;
-
-      switch (channel) {
-        case 'APP_READ_ENVIRONMENT_DATA':
-          result = this.readEnvironmentData(data[0] as string);
-          break;
-        case 'APP_WRITE_ENVIRONMENT_DATA':
-          result = this.writeEnvironmentData(data[0] as Environment);
-          break;
-        case 'APP_DELETE_ENVIRONMENT_DATA':
-          result = this.deleteEnvironmentData(data[0] as string);
-          break;
-        case 'APP_READ_SETTINGS_DATA':
-          result = JSON.parse(localStorage.getItem('appSettings')) as Settings;
-          break;
-        case 'APP_WRITE_SETTINGS_DATA':
-          result = localStorage.setItem('appSettings', JSON.stringify(data[0]));
-          break;
-        case 'APP_BUILD_STORAGE_FILEPATH':
-          result = data[0] as string;
-          break;
-        case 'APP_GET_HASH':
-          {
-            const msgUint8 = new TextEncoder().encode(data[0]);
-
-            result = window.crypto.subtle
-              .digest('SHA-1', msgUint8)
-              .then((hashBuffer) => {
-                const hashArray = Array.from(new Uint8Array(hashBuffer));
-
-                return hashArray
-                  .map((b) => b.toString(16).padStart(2, '0'))
-                  .join('');
-              });
-          }
-          break;
-
-        case 'APP_GET_OS': {
-          // use same names as in electron
-          const platform: string = (
-            navigator?.['userAgentData']?.platform ??
-            navigator.platform ??
-            'unknown'
-          ).toLowerCase();
-
-          if (platform.includes('win')) {
-            result = 'win32';
-          } else if (platform.includes('mac')) {
-            result = 'darwin';
-          } else if (platform.includes('linux')) {
-            result = 'linux';
-          } else {
-            result = 'unknown';
-          }
-          break;
-        }
-
-        case 'APP_READ_CLIPBOARD':
-          result = navigator.clipboard?.readText() ?? '';
-          break;
-
-        default:
-          result = undefined;
-          break;
-      }
-
-      resolve(result);
-    });
+    return this.dispatch(channel, data);
   }
 
   public send(channel: string, ...data: any[]) {
     return new Promise<any>((resolve) => {
-      let result;
-
       switch (channel) {
         case 'APP_WRITE_CLIPBOARD':
-          {
-            if (navigator.clipboard) {
-              navigator.clipboard.writeText(data[0]);
-            }
+          if (navigator.clipboard) {
+            navigator.clipboard.writeText(data[0]);
           }
           break;
 
-        case 'APP_LOGS':
-          {
-            // log similarly to main process (which uses winston)
-            const log = data[0] as {
-              type: 'info' | 'error';
-              message: string;
-              payload?: any;
-            };
+        case 'APP_LOGS': {
+          // log similarly to main process (which uses winston)
+          const log = data[0] as {
+            type: 'info' | 'error';
+            message: string;
+            payload?: any;
+          };
 
-            const consoleMessage = {
-              timestamp: new Date().toISOString(),
-              level: log.type,
-              app: 'mockoon-web',
-              message: log.message,
-              ...log.payload
-            };
+          const consoleMessage = {
+            timestamp: new Date().toISOString(),
+            level: log.type,
+            app: 'mockoon-web',
+            message: log.message,
+            ...log.payload
+          };
 
-            if (log.type === 'error') {
-              // eslint-disable-next-line no-console
-              console.error(consoleMessage);
-            } else if (log.type === 'info') {
-              // eslint-disable-next-line no-console
-              console.log(consoleMessage);
-            }
+          if (log.type === 'error') {
+            // eslint-disable-next-line no-console
+            console.error(consoleMessage);
+          } else if (log.type === 'info') {
+            // eslint-disable-next-line no-console
+            console.log(consoleMessage);
           }
           break;
+        }
         default:
-          result = undefined;
           break;
       }
 
-      resolve(result);
+      resolve(undefined);
     });
   }
 
   public receive(_channel: string, _callback: (...args: any[]) => void) {
     /* noop */
+  }
+
+  private async dispatch(channel: string, data: any[]) {
+    switch (channel) {
+      case 'APP_READ_ENVIRONMENT_DATA':
+        return await this.readEnvironmentData(data[0] as string);
+      case 'APP_WRITE_ENVIRONMENT_DATA':
+        return await this.writeEnvironmentData(
+          data[0] as Environment,
+          data[1] as EnvironmentDescriptor | undefined,
+          data[2] as boolean | undefined
+        );
+      case 'APP_DELETE_ENVIRONMENT_DATA':
+        return await this.deleteEnvironmentData(data[0] as string);
+      case 'APP_READ_SETTINGS_DATA':
+        return await this.readSettingsData();
+      case 'APP_WRITE_SETTINGS_DATA':
+        return await this.writeSettingsData(
+          data[0] as Settings,
+          data[1] as boolean | undefined
+        );
+      case 'APP_BUILD_STORAGE_FILEPATH':
+        return this.buildStorageFilePath(data[0] as string);
+      case 'APP_GET_HASH': {
+        const msgUint8 = new TextEncoder().encode(data[0]);
+
+        return window.crypto.subtle
+          .digest('SHA-1', msgUint8)
+          .then((hashBuffer) => {
+            const hashArray = Array.from(new Uint8Array(hashBuffer));
+
+            return hashArray
+              .map((b) => b.toString(16).padStart(2, '0'))
+              .join('');
+          });
+      }
+      case 'APP_GET_FILENAME':
+        return this.extractFileName(data[0] as string);
+      case 'APP_GET_OS': {
+        // use same names as in electron
+        const platform: string = (
+          navigator?.['userAgentData']?.platform ??
+          navigator.platform ??
+          'unknown'
+        ).toLowerCase();
+
+        if (platform.includes('win')) {
+          return 'win32';
+        } else if (platform.includes('mac')) {
+          return 'darwin';
+        } else if (platform.includes('linux')) {
+          return 'linux';
+        } else {
+          return 'unknown';
+        }
+      }
+      case 'APP_READ_CLIPBOARD':
+        return navigator.clipboard?.readText() ?? '';
+      default:
+        return undefined;
+    }
+  }
+
+  private normalizeApiBase(base?: string): string | null {
+    if (!base) {
+      return null;
+    }
+
+    const trimmed = base.trim();
+
+    if (!trimmed) {
+      return null;
+    }
+
+    return trimmed.endsWith('/') ? trimmed.slice(0, -1) : trimmed;
+  }
+
+  private ensureStorageKey(value: string): string {
+    if (!value) {
+      return '';
+    }
+
+    const lastSegment = value.replaceAll('\\', '/').split('/').pop() ?? '';
+    const sanitized = lastSegment.replace(/[^a-zA-Z0-9_.-]/g, '');
+
+    return sanitized || lastSegment;
+  }
+
+  private buildEnvironmentUrl(path: string, pretty = false): string {
+    if (!this.storageApiBase) {
+      throw new Error('Storage API not configured');
+    }
+
+    const key = this.ensureStorageKey(path);
+    let url = `${this.storageApiBase}/environments/${encodeURIComponent(key)}`;
+
+    if (pretty) {
+      url += url.includes('?') ? '&pretty=1' : '?pretty=1';
+    }
+
+    return url;
+  }
+
+  private buildSettingsUrl(pretty = false): string {
+    if (!this.storageApiBase) {
+      throw new Error('Storage API not configured');
+    }
+
+    let url = `${this.storageApiBase}/settings`;
+
+    if (pretty) {
+      url += '?pretty=1';
+    }
+
+    return url;
+  }
+
+  private buildStorageFilePath(name: string): string {
+    if (this.useStorageApi) {
+      const sanitized = this.ensureStorageKey(name).replace(/\.json$/i, '');
+
+      return `${sanitized || 'environment'}.json`;
+    }
+
+    return name;
+  }
+
+  private extractFileName(path: string): string {
+    if (!path) {
+      return '';
+    }
+
+    const lastSegment = path.replaceAll('\\', '/').split('/').pop() ?? '';
+
+    return lastSegment.replace(/\.json$/i, '');
+  }
+
+  private async readEnvironmentData(
+    path: string
+  ): Promise<Environment | undefined> {
+    if (this.useStorageApi) {
+      try {
+        const response = await fetch(this.buildEnvironmentUrl(path), {
+          cache: 'no-store'
+        });
+
+        if (response.status === 404) {
+          return undefined;
+        }
+
+        if (!response.ok) {
+          throw new Error(
+            `Unable to read environment (${response.statusText || response.status})`
+          );
+        }
+
+        return (await response.json()) as Environment;
+      } catch (error) {
+        throw error instanceof Error
+          ? error
+          : new Error('Unable to read environment');
+      }
+    }
+
+    return await this.readEnvironmentDataIndexedDb(path);
+  }
+
+  private async writeEnvironmentData(
+    environment: Environment,
+    descriptor?: EnvironmentDescriptor,
+    storagePrettyPrint?: boolean
+  ): Promise<void> {
+    if (this.useStorageApi) {
+      const targetPath = descriptor?.path ?? environment.uuid;
+
+      try {
+        const response = await fetch(
+          this.buildEnvironmentUrl(targetPath, storagePrettyPrint === true),
+          {
+            method: 'PUT',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            cache: 'no-store',
+            body: JSON.stringify(environment)
+          }
+        );
+
+        if (!response.ok) {
+          throw new Error(
+            `Unable to write environment (${response.statusText || response.status})`
+          );
+        }
+      } catch (error) {
+        throw error instanceof Error
+          ? error
+          : new Error('Unable to write environment');
+      }
+
+      return;
+    }
+
+    await this.writeEnvironmentDataIndexedDb(environment);
+  }
+
+  private async deleteEnvironmentData(path: string): Promise<void> {
+    if (this.useStorageApi) {
+      try {
+        const response = await fetch(this.buildEnvironmentUrl(path), {
+          method: 'DELETE',
+          cache: 'no-store'
+        });
+
+        if (response.status === 404 || response.status === 204) {
+          return;
+        }
+
+        if (!response.ok) {
+          throw new Error(
+            `Unable to delete environment (${response.statusText || response.status})`
+          );
+        }
+      } catch (error) {
+        throw error instanceof Error
+          ? error
+          : new Error('Unable to delete environment');
+      }
+
+      return;
+    }
+
+    await this.deleteEnvironmentDataIndexedDb(path);
+  }
+
+  private async readSettingsData(): Promise<Settings | null> {
+    if (this.useStorageApi) {
+      try {
+        const response = await fetch(this.buildSettingsUrl(), {
+          cache: 'no-store'
+        });
+
+        if (response.status === 404) {
+          return null;
+        }
+
+        if (!response.ok) {
+          throw new Error(
+            `Unable to read settings (${response.statusText || response.status})`
+          );
+        }
+
+        return (await response.json()) as Settings;
+      } catch (error) {
+        throw error instanceof Error
+          ? error
+          : new Error('Unable to read settings');
+      }
+    }
+
+    const raw = localStorage.getItem('appSettings');
+
+    return raw ? (JSON.parse(raw) as Settings) : null;
+  }
+
+  private async writeSettingsData(
+    settings: Settings,
+    storagePrettyPrint?: boolean
+  ): Promise<void> {
+    if (this.useStorageApi) {
+      try {
+        const response = await fetch(
+          this.buildSettingsUrl(storagePrettyPrint === true),
+          {
+            method: 'PUT',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            cache: 'no-store',
+            body: JSON.stringify(settings)
+          }
+        );
+
+        if (!response.ok) {
+          throw new Error(
+            `Unable to write settings (${response.statusText || response.status})`
+          );
+        }
+      } catch (error) {
+        throw error instanceof Error
+          ? error
+          : new Error('Unable to write settings');
+      }
+
+      return;
+    }
+
+    localStorage.setItem('appSettings', JSON.stringify(settings));
   }
 
   private connectToIndexedDB(): Promise<IDBDatabase> {
@@ -162,13 +412,9 @@ export class MainApiService implements MainAPIModel {
     });
   }
 
-  /**
-   * Delete an environment from IndexedDB
-   *
-   * @param environmentUuid
-   * @returns
-   */
-  private async deleteEnvironmentData(environmentUuid: string): Promise<void> {
+  private async deleteEnvironmentDataIndexedDb(
+    environmentUuid: string
+  ): Promise<void> {
     const db = await this.connectToIndexedDB();
 
     return await new Promise((resolve, reject) => {
@@ -190,13 +436,9 @@ export class MainApiService implements MainAPIModel {
     });
   }
 
-  /**
-   * Write Environment Data to IndexedDB
-   *
-   * @param environment
-   * @returns
-   */
-  private async writeEnvironmentData(environment: Environment): Promise<void> {
+  private async writeEnvironmentDataIndexedDb(
+    environment: Environment
+  ): Promise<void> {
     const db = await this.connectToIndexedDB();
 
     return await new Promise((resolve, reject) => {
@@ -222,13 +464,7 @@ export class MainApiService implements MainAPIModel {
     });
   }
 
-  /**
-   * Read Environment Data from IndexedDB
-   *
-   * @param uuid
-   * @returns
-   */
-  private async readEnvironmentData(
+  private async readEnvironmentDataIndexedDb(
     uuid: string
   ): Promise<Environment | undefined> {
     const db = await this.connectToIndexedDB();

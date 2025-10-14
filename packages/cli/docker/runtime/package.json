@@ -1,0 +1,12 @@
+{
+  "name": "@mockoon/docker-runtime",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Runtime utilities for the Mockoon CLI + UI Docker image",
+  "license": "MIT",
+  "dependencies": {
+    "@mockoon/commons": "9.3.0",
+    "compression": "1.7.4",
+    "express": "4.21.1"
+  }
+}
