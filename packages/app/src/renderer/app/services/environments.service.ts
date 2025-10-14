@@ -2224,8 +2224,10 @@ export class EnvironmentsService {
           )
     ).pipe(
       this.isWeb
-        ? tap((filePath) => {
+        ? switchMap((filePath) => {
             triggerBrowserDownload(filePath, data);
+
+            return of(undefined);
           })
         : switchMap((filePath) =>
             from(
@@ -2235,7 +2237,8 @@ export class EnvironmentsService {
                 this.loggerService.logMessage('info', 'EXPORT_SUCCESS', {
                   environmentName: environment.name
                 });
-              })
+              }),
+              map(() => undefined)
             )
           )
     );
@@ -2428,8 +2431,10 @@ export class EnvironmentsService {
         }),
         // in the web app, trigger a download, in desktop save the file to disk
         this.isWeb
-          ? tap(({ data, filePath }) => {
+          ? switchMap(({ data, filePath }) => {
               triggerBrowserDownload(filePath, data);
+
+              return of(undefined);
             })
           : switchMap(({ data, filePath }) =>
               from(
@@ -2443,7 +2448,8 @@ export class EnvironmentsService {
                       environmentName: activeEnvironment.name
                     }
                   );
-                })
+                }),
+                map(() => undefined)
               )
             ),
         catchError((error) => {

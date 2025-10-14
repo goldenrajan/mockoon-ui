@@ -1,6 +1,12 @@
 import { Injectable } from '@angular/core';
 import { Environment } from '@mockoon/commons';
 import { MainAPIModel } from 'src/renderer/app/models/main-api.model';
+import type {
+  OpenDialogOptions,
+  OpenDialogReturnValue,
+  SaveDialogOptions,
+  SaveDialogReturnValue
+} from 'electron';
 import {
   EnvironmentDescriptor,
   Settings
@@ -44,7 +50,68 @@ export class MainApiService implements MainAPIModel {
     this.useStorageApi = !!this.storageApiBase;
   }
 
-  public invoke(channel: string, ...data: any[]) {
+  public invoke(
+    channel: 'APP_READ_ENVIRONMENT_DATA',
+    path: string
+  ): Promise<Environment>;
+  public invoke(channel: 'APP_READ_SETTINGS_DATA'): Promise<Settings>;
+  public invoke(
+    channel: 'APP_WRITE_ENVIRONMENT_DATA',
+    data: Environment,
+    descriptor: EnvironmentDescriptor,
+    storagePrettyPrint?: boolean
+  ): Promise<void>;
+  public invoke(
+    channel: 'APP_DELETE_ENVIRONMENT_DATA',
+    path: string
+  ): Promise<void>;
+  public invoke(
+    channel: 'APP_WRITE_SETTINGS_DATA',
+    newSettings: Settings,
+    storagePrettyPrint?: boolean
+  ): Promise<void>;
+  public invoke(channel: 'APP_READ_CLIPBOARD'): Promise<any>;
+  public invoke(
+    channel: 'APP_SHOW_OPEN_DIALOG',
+    options: OpenDialogOptions
+  ): Promise<OpenDialogReturnValue>;
+  public invoke(
+    channel: 'APP_SHOW_SAVE_DIALOG',
+    options: SaveDialogOptions
+  ): Promise<SaveDialogReturnValue>;
+  public invoke(
+    channel:
+      | 'APP_GET_MIME_TYPE'
+      | 'APP_GET_HASH'
+      | 'APP_GET_FILENAME'
+      | 'APP_READ_FILE'
+      | 'APP_BUILD_STORAGE_FILEPATH'
+      | 'APP_GET_BASE_PATH'
+      | 'APP_REPLACE_FILEPATH_EXTENSION',
+    pathOrNameOrString: string
+  ): Promise<string>;
+  public invoke(
+    channel: 'APP_WRITE_FILE',
+    path: string,
+    data: string
+  ): Promise<void>;
+  public invoke(
+    channel: 'APP_SERVER_GET_PROCESSED_DATABUCKET_VALUE',
+    environmentUuid: string,
+    databucketUuid: string
+  ): Promise<any>;
+  public invoke(
+    channel: 'APP_START_SERVER',
+    environment: Environment,
+    environmentPath: string
+  ): Promise<any>;
+  public invoke(
+    channel: 'APP_STOP_SERVER' | 'APP_UNWATCH_FILE',
+    uuid: string
+  ): Promise<void>;
+  public invoke(channel: 'APP_GET_OS'): Promise<NodeJS.Platform>;
+  public invoke(channel: 'APP_UNWATCH_ALL_FILE'): Promise<void>;
+  public invoke(channel: string, ...data: any[]): Promise<any> {
     return this.dispatch(channel, data);
   }
 

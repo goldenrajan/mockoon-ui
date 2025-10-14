@@ -14,6 +14,7 @@ COPY tsconfig.json ./tsconfig.json
 COPY .npmrc ./
 
 RUN npm ci
+RUN npx --yes lerna bootstrap --ci
 RUN npm run build:libs
 RUN npm run build:web:prod
 
