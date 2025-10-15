@@ -11,6 +11,7 @@ import {
   EnvironmentDescriptor,
   Settings
 } from 'src/shared/models/settings.model';
+import { sha1 } from 'src/renderer/app/utils/sha1';
 
 type DockerRuntimeConfig = {
   storageApiBase?: string;
@@ -183,17 +184,22 @@ export class MainApiService implements MainAPIModel {
       case 'APP_BUILD_STORAGE_FILEPATH':
         return this.buildStorageFilePath(data[0] as string);
       case 'APP_GET_HASH': {
-        const msgUint8 = new TextEncoder().encode(data[0]);
+        const message = String(data[0] ?? '');
+        const subtle = window.crypto?.subtle;
 
-        return window.crypto.subtle
-          .digest('SHA-1', msgUint8)
-          .then((hashBuffer) => {
+        if (subtle) {
+          const msgUint8 = new TextEncoder().encode(message);
+
+          return subtle.digest('SHA-1', msgUint8).then((hashBuffer) => {
             const hashArray = Array.from(new Uint8Array(hashBuffer));
 
             return hashArray
-              .map((b) => b.toString(16).padStart(2, '0'))
+              .map((byte) => byte.toString(16).padStart(2, '0'))
               .join('');
           });
+        }
+
+        return Promise.resolve(sha1(message));
       }
       case 'APP_GET_FILENAME':
         return this.extractFileName(data[0] as string);
