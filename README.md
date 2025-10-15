@@ -62,6 +62,31 @@ Linux:
 
 Mockoon CLI is available as an [NPM package](https://www.npmjs.com/package/@mockoon/cli). Please check our [dedicated documentation](https://github.com/mockoon/mockoon/blob/main/packages/cli/README.md) to learn how to install and use it.
 
+## Build the Docker UI + CLI image
+
+You can bundle the web UI together with the CLI runtime by using the Dockerfile located in `packages/cli/docker/`.
+
+1. From the repository root, build the image:
+   ```
+   docker build -f packages/cli/docker/Dockerfile -t mockoon-cli-ui:latest .
+   ```
+   The builder stage installs all workspace dependencies (`npm ci` + `lerna bootstrap`) and compiles the libraries and web UI.
+2. Prepare a writable data directory on the host so the container can persist environments and settings (adjust permissions as needed):
+   ```
+   mkdir mockoon-data
+   chmod 777 mockoon-data
+   ```
+   On PowerShell you can run `New-Item -ItemType Directory mockoon-data`.
+3. Run the container, exposing both the CLI API (3000) and the web UI (8080):
+   ```
+   docker run --rm \
+     -p 3000:3000 \
+     -p 8080:8080 \
+     -v ${PWD}/mockoon-data:/data \
+     mockoon-cli-ui:latest
+   ```
+   When using PowerShell, prefer forward slashes in the bind mount path (e.g. `${PWD}/mockoon-data:/data`). The runtime writes the UI distribution to `/opt/mockoon/ui`, exposes the storage API under `/storage`, and runs as the unprivileged `mockoon` user.
+
 ## Use in cloud functions and serverless environments
 
 Mockoon's Serverless [NPM package](https://www.npmjs.com/package/@mockoon/serverless) provides an easy way to run Mockoon's mock APIs in cloud functions and serverless environments: AWS Lambda, GCP Functions, Firebase Functions, etc.
