@@ -168,10 +168,45 @@ export const repairRefs = (environment: Environment): Environment => {
  *
  * @returns
  */
-export const generateUUID = (): string =>
-  typeof window !== 'undefined'
-    ? window.crypto.randomUUID()
-    : require('crypto').randomUUID();
+export const generateUUID = (): string => {
+  if (typeof window !== 'undefined') {
+    const cryptoApi = window.crypto;
+
+    if (cryptoApi && typeof cryptoApi.randomUUID === 'function') {
+      return cryptoApi.randomUUID();
+    }
+
+    if (cryptoApi && typeof cryptoApi.getRandomValues === 'function') {
+      const buffer = new Uint8Array(16);
+
+      cryptoApi.getRandomValues(buffer);
+
+      buffer[6] = (buffer[6] & 0x0f) | 0x40;
+      buffer[8] = (buffer[8] & 0x3f) | 0x80;
+
+      const hex = Array.from(buffer, (byte) =>
+        byte.toString(16).padStart(2, '0')
+      ).join('');
+
+      return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(
+        12,
+        16
+      )}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+    }
+  }
+
+  if (typeof require === 'function') {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires, global-require
+    return require('crypto').randomUUID();
+  }
+
+  const fallback = () =>
+    Math.floor((1 + Math.random()) * 0x10000)
+      .toString(16)
+      .substring(1);
+
+  return `${fallback()}${fallback()}-${fallback()}-${fallback()}-${fallback()}-${fallback()}${fallback()}${fallback()}`;
+};
 
 /**
  * Return a random integer
