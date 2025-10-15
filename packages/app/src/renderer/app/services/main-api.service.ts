@@ -51,6 +51,10 @@ export class MainApiService implements MainAPIModel {
     this.useStorageApi = !!this.storageApiBase;
   }
 
+  public isStorageApiEnabled(): boolean {
+    return this.useStorageApi;
+  }
+
   public invoke(
     channel: 'APP_READ_ENVIRONMENT_DATA',
     path: string

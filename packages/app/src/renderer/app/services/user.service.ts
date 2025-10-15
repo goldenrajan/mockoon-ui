@@ -40,6 +40,10 @@ export class UserService {
   private idToken$ = idToken(this.auth);
   private lastUserRefresh = 0;
 
+  private shouldPromptForAuth(): boolean {
+    return this.isWeb && !this.mainApiService.isStorageApiEnabled();
+  }
+
   constructor(
     private httpClient: HttpClient,
     private store: Store,
@@ -138,9 +142,9 @@ export class UserService {
    * Open the auth modal and send the APP_AUTH event to the main process
    */
   public startLoginFlow() {
-    if (Config.isWeb) {
+    if (this.shouldPromptForAuth()) {
       this.uiService.openModal('authIframe');
-    } else {
+    } else if (!this.isWeb) {
       this.uiService.openModal('auth');
       this.mainApiService.send('APP_AUTH');
     }
@@ -202,6 +206,10 @@ export class UserService {
    * @returns
    */
   public webAuthHandler() {
+    if (!this.shouldPromptForAuth()) {
+      return EMPTY;
+    }
+
     return combineLatest([
       authState(this.auth),
       this.store.select('settings')
